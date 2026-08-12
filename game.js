@@ -118,7 +118,55 @@ class Asteroid {
   }
 }
 
+// ── SpeedPickup (power-up velocidad) ──────────────────────────────────────────
+class SpeedPickup {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 10;
+    const angle = rand(0, Math.PI * 2);
+    const drift = rand(20, 40);
+    this.vx = Math.cos(angle) * drift;
+    this.vy = Math.sin(angle) * drift;
+    this.phase = rand(0, Math.PI * 2);
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.phase += dt * 3;
+  }
+
+  draw() {
+    // Anillo pulsante
+    const pulse = 1 + Math.sin(this.phase) * 0.15;
+    ctx.strokeStyle = 'rgba(80, 220, 255, 0.5)';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius * pulse + 4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Doble chevron ">>" (icono de velocidad)
+    const s = 4.5;
+    ctx.strokeStyle = '#4ff';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.x - s,     this.y - s);
+    ctx.lineTo(this.x + s,     this.y);
+    ctx.lineTo(this.x - s,     this.y + s);
+    ctx.moveTo(this.x - s * 2, this.y - s);
+    ctx.lineTo(this.x,         this.y);
+    ctx.lineTo(this.x - s * 2, this.y + s);
+    ctx.stroke();
+  }
+}
+
 // ── Ship ──────────────────────────────────────────────────────────────────────
+const SPEED_MULT     = 2;  // multiplicador de velocidad del boost
+const BOOST_DURATION = 5;  // duración del boost en segundos
+
 class Ship {
   constructor() { this.reset(); }
 
@@ -132,6 +180,8 @@ class Ship {
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
+    this.boostTimer    = 0;
+    this.trail         = [];
     this.dead          = false;
   }
 
@@ -139,24 +189,35 @@ class Ship {
     if (this.dead) return;
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
+    if (this.boostTimer    > 0) this.boostTimer    -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = 260;  // px/s²
     const DRAG   = 0.987;
+    const speedMult = this.boostTimer > 0 ? SPEED_MULT : 1;
 
     if (keys['ArrowLeft'])  this.angle -= ROT * dt;
     if (keys['ArrowRight']) this.angle += ROT * dt;
 
     this.thrusting = !!keys['ArrowUp'];
     if (this.thrusting) {
-      this.vx += Math.cos(this.angle) * THRUST * dt;
-      this.vy += Math.sin(this.angle) * THRUST * dt;
+      this.vx += Math.cos(this.angle) * THRUST * speedMult * dt;
+      this.vy += Math.sin(this.angle) * THRUST * speedMult * dt;
     }
 
     this.vx *= DRAG;
     this.vy *= DRAG;
     this.x = wrap(this.x + this.vx * dt, W);
     this.y = wrap(this.y + this.vy * dt, H);
+
+    // Estela del boost: puntos espaciados que se desvanecen
+    if (this.boostTimer > 0) {
+      const last = this.trail[this.trail.length - 1];
+      if (!last || dist(last, this) > 6)
+        this.trail.push({ x: this.x, y: this.y, life: 0.45 });
+    }
+    for (const t of this.trail) t.life -= dt;
+    this.trail = this.trail.filter(t => t.life > 0);
   }
 
   tryShoot() {
@@ -173,10 +234,19 @@ class Ship {
     // Parpadeo durante invencibilidad de reaparición
     if (this.invincible > 0 && Math.floor(this.invincible * 8) % 2 === 0) return;
 
+    // Estela del boost de velocidad
+    for (const t of this.trail) {
+      const alpha = t.life / 0.45;
+      ctx.fillStyle = `rgba(80, 220, 255, ${(alpha * 0.45).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, 3.5 * alpha, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = '#fff';
+    ctx.strokeStyle = this.boostTimer > 0 ? '#4ff' : '#fff';
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
@@ -236,10 +306,13 @@ class Particle {
 }
 
 // ── Estado del juego ──────────────────────────────────────────────────────────
+const PICKUP_INTERVAL = 12;  // segundos entre apariciones del power-up
+
 let ship, bullets, asteroids, particles;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
+let pickup, pickupTimer;
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -262,6 +335,8 @@ function initGame() {
   lives  = 3;
   level  = 1;
   state  = 'playing';
+  pickup = null;
+  pickupTimer = 5;   // primera aparición rápida
   spawnAsteroids(4);
 }
 
@@ -269,6 +344,8 @@ function nextLevel() {
   level++;
   bullets   = [];
   particles = [];
+  pickup = null;
+  pickupTimer = PICKUP_INTERVAL;
   ship.reset();
   spawnAsteroids(3 + level);
 }
@@ -346,6 +423,28 @@ function update(dt) {
     }
   }
 
+  // Power-up velocidad: aparición y recolección
+  pickupTimer -= dt;
+  if (pickupTimer <= 0 && !pickup) {
+    let x, y;
+    do {
+      x = rand(0, W);
+      y = rand(0, H);
+    } while (Math.hypot(x - ship.x, y - ship.y) < 150);
+    pickup = new SpeedPickup(x, y);
+    pickupTimer = PICKUP_INTERVAL;
+  }
+  if (pickup) {
+    pickup.update(dt);
+    if (dist(ship, pickup) < pickup.radius + ship.radius) {
+      ship.boostTimer = BOOST_DURATION;
+      ship.vx *= SPEED_MULT;   // impulso inmediato
+      ship.vy *= SPEED_MULT;
+      explode(pickup.x, pickup.y, 10);
+      pickup = null;
+    }
+  }
+
   // Nivel completado
   if (asteroids.length === 0) nextLevel();
 }
@@ -381,6 +480,20 @@ function drawHUD() {
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
 
+  // Barra del boost de velocidad
+  if (ship.boostTimer > 0) {
+    const w = 120;
+    const x = W / 2 - w / 2;
+    const y = 44;
+    ctx.fillStyle = 'rgba(80, 220, 255, 0.25)';
+    ctx.fillRect(x, y, w, 6);
+    ctx.fillStyle = '#4ff';
+    ctx.fillRect(x, y, w * (ship.boostTimer / BOOST_DURATION), 6);
+    ctx.fillStyle = '#4ff';
+    ctx.font      = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('VELOCIDAD', W / 2, y - 6);
+  }
 }
 
 function drawOverlay(title, sub) {
@@ -400,6 +513,7 @@ function draw() {
   particles.forEach(p => p.draw());
   asteroids.forEach(a => a.draw());
   bullets.forEach(b => b.draw());
+  if (pickup) pickup.draw();
   ship.draw();
 
   drawHUD();

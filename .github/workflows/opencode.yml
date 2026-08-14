@@ -30,6 +30,8 @@ jobs:
           git config user.name "fertrojas"
           git config user.email "fertrojas@gmail.com"
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run opencode
         uses: anomalyco/opencode/github@latest

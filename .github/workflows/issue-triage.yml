@@ -1,0 +1,62 @@
+name: Triaje de issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install opencode
+        run: curl -fsSL https://opencode.ai/install | bash
+
+      - name: Add opencode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Triage issue con opencode
+        run: opencode run --auto -m deepseek/deepseek-v4-pro "$TRIAGE_PROMPT"
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          TRIAGE_PROMPT: |
+            Eres un asistente de triaje del repositorio "opencode-asteroids", un juego arcade en HTML5 Canvas puro: index.html, game.js, favicon.svg. No hay build system ni dependencias.
+
+            Se acaba de crear el issue #${{ github.event.issue.number }}: "${{ github.event.issue.title }}"
+            URL: ${{ github.event.issue.html_url }}
+
+            Lee el issue completo y explora el repositorio (game.js, index.html, AGENTS.md, README.md) para entender el contexto del pedido.
+
+            REGLAS ESTRICTAS:
+            1. NO modifiques el cuerpo (body) del issue. Debe quedar exactamente como lo escribió el autor, tal cual.
+            2. NO crees archivos, NO hagas commits ni pushes, NO implementes la funcionalidad. Solo haz triaje.
+            3. Elige labels de la lista existente del repositorio: bug, documentation, duplicate, enhancement, good first issue, help wanted, invalid, question, wontfix. Añade los que correspondan al issue con:
+               gh issue edit ${{ github.event.issue.number }} --add-label "label1" --add-label "label2"
+               Si ningún label aplica, no añadas ninguno.
+            4. Redacta un comentario en español en /tmp/triage.md con esta estructura:
+               - Título "Triaje automático"
+               - "Contexto del proyecto": estructura del repo y gotchas de AGENTS.md relevantes al pedido.
+               - "Referencias de código": funciones y líneas concretas de game.js o index.html relacionadas con el tema del issue (formato archivo:línea).
+               - "Requisitos e interpretación": reformulación clara y estructurada de lo que pide el issue.
+               - "Preguntas / aclaraciones": puntos ambiguos o información faltante que convendría que el autor complete.
+               - "Labels aplicados": lista de los labels añadidos, o "ninguno".
+               Publica el comentario con:
+               gh issue comment ${{ github.event.issue.number }} --body-file /tmp/triage.md
+            5. Al final, verifica con `gh issue view ${{ github.event.issue.number }}` que el body del issue quedó intacto y que los labels se aplicaron correctamente.

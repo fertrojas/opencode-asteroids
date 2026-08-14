@@ -353,6 +353,15 @@ const SKINS = [
     flame:  'rgba(255, 80, 220, 0.9)',
     verts: [[18, 0], [6, -10], [-6, -6], [-14, -10], [-10, -2], [-18, 0], [-10, 2], [-14, 10], [-6, 6], [6, 10]],
   },
+  {
+    name:  'Morada',
+    stroke: '#b26bff',
+    boost:  '#fff',
+    flame:  'rgba(180, 110, 255, 0.9)',
+    verts: [[20, 0], [-12, -9], [-7, 0], [-12, 9]],
+    scale: 2,
+    scoreMult: 2,
+  },
 ];
 
 function drawShipPath(skinIndex, scale = 1) {
@@ -382,8 +391,12 @@ class Ship {
     this.reset();
   }
 
+  get scale() { return SKINS[this.skin].scale || 1; }
+  get scoreMult() { return SKINS[this.skin].scoreMult || 1; }
+
   cycleSkin() {
     this.skin = (this.skin + 1) % SKINS.length;
+    this.radius = 12 * this.scale;
     saveSkin(this.skin);
   }
 
@@ -393,7 +406,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = 12 * this.scale;
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -451,8 +464,8 @@ class Ship {
         this.burstCount--;
         this.burstDelay = BURST_GAP;
         fired.push(new Bullet(
-          this.x + Math.cos(this.burstAngle) * SHIP_NOSE,
-          this.y + Math.sin(this.burstAngle) * SHIP_NOSE,
+          this.x + Math.cos(this.burstAngle) * SHIP_NOSE * this.scale,
+          this.y + Math.sin(this.burstAngle) * SHIP_NOSE * this.scale,
           this.burstAngle
         ));
       }
@@ -472,8 +485,8 @@ class Ship {
       this.burstDelay = BURST_GAP;
     }
 
-    const ox = this.x + Math.cos(this.angle) * SHIP_NOSE;
-    const oy = this.y + Math.sin(this.angle) * SHIP_NOSE;
+    const ox = this.x + Math.cos(this.angle) * SHIP_NOSE * this.scale;
+    const oy = this.y + Math.sin(this.angle) * SHIP_NOSE * this.scale;
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -510,6 +523,7 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
+    ctx.scale(this.scale, this.scale);
     const skin = SKINS[this.skin];
     ctx.strokeStyle = this.boostTimer > 0 ? skin.boost
                     : this.tripleTimer > 0 ? '#ff4'
@@ -687,7 +701,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += a.points;
+        score += a.points * ship.scoreMult;
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
       }
@@ -703,7 +717,7 @@ function update(dt) {
         if (ship.shieldTimer > 0) {
           // El escudo destruye el asteroide como si fuera una bala
           a.dead = true;
-          score += a.points;
+          score += a.points * ship.scoreMult;
           explode(a.x, a.y, a.size * 5);
           const shards = a.split();
           asteroids = asteroids.filter(x => !x.dead).concat(shards);

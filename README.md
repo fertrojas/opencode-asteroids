@@ -24,11 +24,12 @@ Luego visita `http://localhost:3000`.
 
 ## Controles
 
-| Tecla     | Acción     |
-| --------- | ---------- |
-| `←` `→`   | Rotar nave |
-| `↑`       | Propulsar  |
-| `Espacio` | Disparar   |
+| Tecla     | Acción         |
+| --------- | -------------- |
+| `←` `→`   | Rotar nave     |
+| `↑`       | Propulsar      |
+| `Espacio` | Disparar       |
+| `S`       | Cambiar skin de la nave |
 
 ## Puntuación
 
@@ -44,3 +45,4 @@ Luego visita `http://localhost:3000`.
 - Asteroides se parten en fragmentos más pequeños al ser destruidos
 - Partículas de explosión al destruir asteroides
 - Estrella fugaz: asteroide rápido que aparece periódicamente y desaparece solo
+- Skins de nave: pulsa `S` para ciclar entre formas y colores (se guarda la elección)

@@ -164,6 +164,49 @@ class SpeedPickup {
   }
 }
 
+// ── ShieldPickup (power-up escudo) ────────────────────────────────────────────
+class ShieldPickup {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 10;
+    const angle = rand(0, Math.PI * 2);
+    const drift = rand(20, 40);
+    this.vx = Math.cos(angle) * drift;
+    this.vy = Math.sin(angle) * drift;
+    this.phase = rand(0, Math.PI * 2);
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.phase += dt * 3;
+  }
+
+  draw() {
+    // Anillo pulsante
+    const pulse = 1 + Math.sin(this.phase) * 0.15;
+    ctx.strokeStyle = 'rgba(80, 220, 255, 0.5)';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius * pulse + 4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Silueta de escudo arcade
+    const w = 7, h = 9;
+    ctx.strokeStyle = '#4ff';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.x - w, this.y - h / 2);
+    ctx.quadraticCurveTo(this.x, this.y - h - 3, this.x + w, this.y - h / 2);
+    ctx.lineTo(this.x, this.y + h);
+    ctx.lineTo(this.x - w, this.y - h / 2);
+    ctx.stroke();
+  }
+}
+
 // ── ShootingStar (estrella fugaz) ─────────────────────────────────────────────
 class ShootingStar extends Asteroid {
   constructor(x, y) {
@@ -230,6 +273,7 @@ class ShootingStar extends Asteroid {
 // ── Ship ──────────────────────────────────────────────────────────────────────
 const SPEED_MULT     = 2;  // multiplicador de velocidad del boost
 const BOOST_DURATION = 5;  // duración del boost en segundos
+const SHIELD_DURATION = 5; // duración del escudo en segundos
 
 class Ship {
   constructor() { this.reset(); }
@@ -245,6 +289,7 @@ class Ship {
     this.invincible    = 3;
     this.shootCooldown = 0;
     this.boostTimer    = 0;
+    this.shieldTimer   = 0;
     this.trail         = [];
     this.dead          = false;
   }
@@ -254,6 +299,7 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.boostTimer    > 0) this.boostTimer    -= dt;
+    if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = 260;  // px/s²
@@ -305,6 +351,22 @@ class Ship {
       ctx.beginPath();
       ctx.arc(t.x, t.y, 3.5 * alpha, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Burbuja del escudo
+    if (this.shieldTimer > 0) {
+      const pulse = 1 + Math.sin(performance.now() / 250) * 0.06;
+      const r = (this.radius + 12) * pulse;
+      ctx.strokeStyle = 'rgba(80, 220, 255, 0.7)';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(80, 220, 255, 0.25)';
+      ctx.lineWidth   = 5;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     ctx.save();
@@ -372,12 +434,14 @@ class Particle {
 // ── Estado del juego ──────────────────────────────────────────────────────────
 const PICKUP_INTERVAL = 12;  // segundos entre apariciones del power-up
 const STAR_INTERVAL   = 10;  // segundos entre apariciones de la estrella fugaz
+const SHIELD_INTERVAL = 12;  // segundos entre apariciones del escudo
 
 let ship, bullets, asteroids, particles;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
 let pickup, pickupTimer, starTimer;
+let shieldPickup, shieldSpawnTimer;
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -403,6 +467,8 @@ function initGame() {
   pickup = null;
   pickupTimer = 5;   // primera aparición rápida
   starTimer = 8;     // primera estrella fugaz pronta
+  shieldPickup = null;
+  shieldSpawnTimer = 5;   // primera aparición rápida
   spawnAsteroids(4);
 }
 
@@ -413,6 +479,8 @@ function nextLevel() {
   pickup = null;
   pickupTimer = PICKUP_INTERVAL;
   starTimer = STAR_INTERVAL;
+  shieldPickup = null;
+  shieldSpawnTimer = SHIELD_INTERVAL;
   ship.reset();
   spawnAsteroids(3 + level);
 }
@@ -484,7 +552,16 @@ function update(dt) {
   if (ship.invincible <= 0) {
     for (const a of asteroids) {
       if (dist(ship, a) < ship.radius + a.radius * 0.82) {
-        killShip();
+        if (ship.shieldTimer > 0) {
+          // El escudo destruye el asteroide como si fuera una bala
+          a.dead = true;
+          score += a.points;
+          explode(a.x, a.y, a.size * 5);
+          const shards = a.split();
+          asteroids = asteroids.filter(x => !x.dead).concat(shards);
+        } else {
+          killShip();
+        }
         break;
       }
     }
@@ -509,6 +586,26 @@ function update(dt) {
       ship.vy *= SPEED_MULT;
       explode(pickup.x, pickup.y, 10);
       pickup = null;
+    }
+  }
+
+  // Power-up escudo: aparición y recolección
+  shieldSpawnTimer -= dt;
+  if (shieldSpawnTimer <= 0 && !shieldPickup) {
+    let x, y;
+    do {
+      x = rand(0, W);
+      y = rand(0, H);
+    } while (Math.hypot(x - ship.x, y - ship.y) < 150);
+    shieldPickup = new ShieldPickup(x, y);
+    shieldSpawnTimer = SHIELD_INTERVAL;
+  }
+  if (shieldPickup) {
+    shieldPickup.update(dt);
+    if (dist(ship, shieldPickup) < shieldPickup.radius + ship.radius) {
+      ship.shieldTimer = SHIELD_DURATION;
+      explode(shieldPickup.x, shieldPickup.y, 10);
+      shieldPickup = null;
     }
   }
 
@@ -575,6 +672,21 @@ function drawHUD() {
     ctx.textAlign = 'center';
     ctx.fillText('VELOCIDAD', W / 2, y - 6);
   }
+
+  // Barra del escudo
+  if (ship.shieldTimer > 0) {
+    const w = 120;
+    const x = W / 2 - w / 2;
+    const y = ship.boostTimer > 0 ? 58 : 44;
+    ctx.fillStyle = 'rgba(80, 220, 255, 0.25)';
+    ctx.fillRect(x, y, w, 6);
+    ctx.fillStyle = '#4ff';
+    ctx.fillRect(x, y, w * (ship.shieldTimer / SHIELD_DURATION), 6);
+    ctx.fillStyle = '#4ff';
+    ctx.font      = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ESCUDO', W / 2, y - 6);
+  }
 }
 
 function drawOverlay(title, sub) {
@@ -595,6 +707,7 @@ function draw() {
   asteroids.forEach(a => a.draw());
   bullets.forEach(b => b.draw());
   if (pickup) pickup.draw();
+  if (shieldPickup) shieldPickup.draw();
   ship.draw();
 
   drawHUD();

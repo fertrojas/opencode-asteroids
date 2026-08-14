@@ -164,6 +164,50 @@ class SpeedPickup {
   }
 }
 
+// ── TriplePickup (power-up disparo triple) ────────────────────────────────────
+class TriplePickup {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 10;
+    const angle = rand(0, Math.PI * 2);
+    const drift = rand(20, 40);
+    this.vx = Math.cos(angle) * drift;
+    this.vy = Math.sin(angle) * drift;
+    this.phase = rand(0, Math.PI * 2);
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.phase += dt * 3;
+  }
+
+  draw() {
+    // Anillo pulsante
+    const pulse = 1 + Math.sin(this.phase) * 0.15;
+    ctx.strokeStyle = 'rgba(255, 255, 120, 0.5)';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius * pulse + 4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Icono de 3 balas (líneas verticales)
+    const s = 4;
+    ctx.strokeStyle = '#ff4';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.x - s - 3, this.y - s);
+    ctx.lineTo(this.x - s - 3, this.y + s);
+    ctx.moveTo(this.x,         this.y - s);
+    ctx.lineTo(this.x,         this.y + s);
+    ctx.moveTo(this.x + s + 3, this.y - s);
+    ctx.lineTo(this.x + s + 3, this.y + s);
+    ctx.stroke();
+  }
+}
+
 // ── ShootingStar (estrella fugaz) ─────────────────────────────────────────────
 class ShootingStar extends Asteroid {
   constructor(x, y) {
@@ -228,8 +272,12 @@ class ShootingStar extends Asteroid {
 }
 
 // ── Ship ──────────────────────────────────────────────────────────────────────
-const SPEED_MULT     = 2;  // multiplicador de velocidad del boost
-const BOOST_DURATION = 5;  // duración del boost en segundos
+const SPEED_MULT      = 2;  // multiplicador de velocidad del boost
+const BOOST_DURATION  = 5;  // duración del boost en segundos
+const TRIPLE_DURATION = 5;  // duración del power-up disparo triple
+const BURST_COUNT     = 3;  // balas por ráfaga
+const BURST_GAP       = 0.07; // segundos entre balas de la ráfaga
+const SHIP_NOSE       = 21;  // distancia de la nariz al origen de la nave
 
 class Ship {
   constructor() { this.reset(); }
@@ -245,15 +293,21 @@ class Ship {
     this.invincible    = 3;
     this.shootCooldown = 0;
     this.boostTimer    = 0;
+    this.tripleTimer   = 0;
+    this.burstCount    = 0;
+    this.burstDelay    = 0;
+    this.burstAngle    = 0;
     this.trail         = [];
     this.dead          = false;
   }
 
   update(dt) {
-    if (this.dead) return;
+    const fired = [];
+    if (this.dead) return fired;
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.boostTimer    > 0) this.boostTimer    -= dt;
+    if (this.tripleTimer   > 0) this.tripleTimer   -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = 260;  // px/s²
@@ -282,14 +336,37 @@ class Ship {
     }
     for (const t of this.trail) t.life -= dt;
     this.trail = this.trail.filter(t => t.life > 0);
+
+    // Ráfaga del disparo triple: balas restantes en línea recta
+    if (this.burstCount > 0) {
+      this.burstDelay -= dt;
+      if (this.burstDelay <= 0) {
+        this.burstCount--;
+        this.burstDelay = BURST_GAP;
+        fired.push(new Bullet(
+          this.x + Math.cos(this.burstAngle) * SHIP_NOSE,
+          this.y + Math.sin(this.burstAngle) * SHIP_NOSE,
+          this.burstAngle
+        ));
+      }
+    }
+
+    return fired;
   }
 
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
     this.shootCooldown = 0.2;
-    const NOSE = 21;
-    const ox = this.x + Math.cos(this.angle) * NOSE;
-    const oy = this.y + Math.sin(this.angle) * NOSE;
+
+    // Disparo triple: el Space dispara la primera bala e inicia la ráfaga
+    if (this.tripleTimer > 0) {
+      this.burstAngle = this.angle;
+      this.burstCount = BURST_COUNT - 1;
+      this.burstDelay = BURST_GAP;
+    }
+
+    const ox = this.x + Math.cos(this.angle) * SHIP_NOSE;
+    const oy = this.y + Math.sin(this.angle) * SHIP_NOSE;
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -310,7 +387,9 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = this.boostTimer > 0 ? '#4ff' : '#fff';
+    ctx.strokeStyle = this.boostTimer > 0 ? '#4ff'
+                    : this.tripleTimer > 0 ? '#ff4'
+                    : '#fff';
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
@@ -372,12 +451,14 @@ class Particle {
 // ── Estado del juego ──────────────────────────────────────────────────────────
 const PICKUP_INTERVAL = 12;  // segundos entre apariciones del power-up
 const STAR_INTERVAL   = 10;  // segundos entre apariciones de la estrella fugaz
+const TRIPLE_INTERVAL = 16;  // segundos entre apariciones del disparo triple
 
 let ship, bullets, asteroids, particles;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
 let pickup, pickupTimer, starTimer;
+let triplePickup, triplePickupTimer;
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -403,6 +484,8 @@ function initGame() {
   pickup = null;
   pickupTimer = 5;   // primera aparición rápida
   starTimer = 8;     // primera estrella fugaz pronta
+  triplePickup = null;
+  triplePickupTimer = 9;   // primera aparición pronta
   spawnAsteroids(4);
 }
 
@@ -413,6 +496,8 @@ function nextLevel() {
   pickup = null;
   pickupTimer = PICKUP_INTERVAL;
   starTimer = STAR_INTERVAL;
+  triplePickup = null;
+  triplePickupTimer = TRIPLE_INTERVAL;
   ship.reset();
   spawnAsteroids(3 + level);
 }
@@ -456,7 +541,7 @@ function update(dt) {
     bullets.push(...ship.tryShoot());
   }
 
-  ship.update(dt);
+  bullets.push(...ship.update(dt));
   bullets.forEach(b => b.update(dt));
   asteroids.forEach(a => a.update(dt));
   particles.forEach(p => p.update(dt));
@@ -509,6 +594,26 @@ function update(dt) {
       ship.vy *= SPEED_MULT;
       explode(pickup.x, pickup.y, 10);
       pickup = null;
+    }
+  }
+
+  // Power-up disparo triple: aparición y recolección (temporizador propio)
+  triplePickupTimer -= dt;
+  if (triplePickupTimer <= 0 && !triplePickup) {
+    let x, y;
+    do {
+      x = rand(0, W);
+      y = rand(0, H);
+    } while (Math.hypot(x - ship.x, y - ship.y) < 150);
+    triplePickup = new TriplePickup(x, y);
+    triplePickupTimer = TRIPLE_INTERVAL;
+  }
+  if (triplePickup) {
+    triplePickup.update(dt);
+    if (dist(ship, triplePickup) < triplePickup.radius + ship.radius) {
+      ship.tripleTimer = TRIPLE_DURATION;
+      explode(triplePickup.x, triplePickup.y, 10);
+      triplePickup = null;
     }
   }
 
@@ -575,6 +680,21 @@ function drawHUD() {
     ctx.textAlign = 'center';
     ctx.fillText('VELOCIDAD', W / 2, y - 6);
   }
+
+  // Barra del disparo triple
+  if (ship.tripleTimer > 0) {
+    const w = 120;
+    const x = W / 2 - w / 2;
+    const y = 58;
+    ctx.fillStyle = 'rgba(255, 255, 80, 0.25)';
+    ctx.fillRect(x, y, w, 6);
+    ctx.fillStyle = '#ff4';
+    ctx.fillRect(x, y, w * (ship.tripleTimer / TRIPLE_DURATION), 6);
+    ctx.fillStyle = '#ff4';
+    ctx.font      = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('TRIPLE', W / 2, y - 6);
+  }
 }
 
 function drawOverlay(title, sub) {
@@ -595,6 +715,7 @@ function draw() {
   asteroids.forEach(a => a.draw());
   bullets.forEach(b => b.draw());
   if (pickup) pickup.draw();
+  if (triplePickup) triplePickup.draw();
   ship.draw();
 
   drawHUD();

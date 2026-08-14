@@ -353,6 +353,15 @@ const SKINS = [
     flame:  'rgba(255, 80, 220, 0.9)',
     verts: [[18, 0], [6, -10], [-6, -6], [-14, -10], [-10, -2], [-18, 0], [-10, 2], [-14, 10], [-6, 6], [6, 10]],
   },
+  {
+    name:  'Coloso',
+    stroke: '#b26bff',
+    boost:  '#fff',
+    flame:  'rgba(178, 107, 255, 0.9)',
+    scale: 2,
+    pointsMult: 2,
+    verts: [[20, 0], [-12, -9], [-7, 0], [-12, 9]],
+  },
 ];
 
 function drawShipPath(skinIndex, scale = 1) {
@@ -384,7 +393,20 @@ class Ship {
 
   cycleSkin() {
     this.skin = (this.skin + 1) % SKINS.length;
+    this.radius = this.radiusForSkin();
     saveSkin(this.skin);
+  }
+
+  scaleForSkin() {
+    return SKINS[this.skin].scale || 1;
+  }
+
+  radiusForSkin() {
+    return 12 * this.scaleForSkin();
+  }
+
+  pointsMult() {
+    return SKINS[this.skin].pointsMult || 1;
   }
 
   reset() {
@@ -393,7 +415,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = this.radiusForSkin();
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -511,6 +533,7 @@ class Ship {
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
     const skin = SKINS[this.skin];
+    const scale = skin.scale || 1;
     ctx.strokeStyle = this.boostTimer > 0 ? skin.boost
                     : this.tripleTimer > 0 ? '#ff4'
                     : skin.stroke;
@@ -518,13 +541,13 @@ class Ship {
     ctx.lineJoin    = 'round';
 
     // Silueta según la skin activa
-    drawShipPath(this.skin);
+    drawShipPath(this.skin, scale);
     ctx.stroke();
 
     // Llama del propulsor (anclada al punto trasero de la forma)
     if (this.thrusting && Math.random() > 0.35) {
       let minX = 0;
-      for (const v of skin.verts) if (v[0] < minX) minX = v[0];
+      for (const v of skin.verts) if (v[0] * scale < minX) minX = v[0] * scale;
       const base = minX + 2;
       ctx.beginPath();
       ctx.moveTo(base, -4);
@@ -687,7 +710,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += a.points;
+        score += a.points * ship.pointsMult();
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
       }
@@ -703,7 +726,7 @@ function update(dt) {
         if (ship.shieldTimer > 0) {
           // El escudo destruye el asteroide como si fuera una bala
           a.dead = true;
-          score += a.points;
+          score += a.points * ship.pointsMult();
           explode(a.x, a.y, a.size * 5);
           const shards = a.split();
           asteroids = asteroids.filter(x => !x.dead).concat(shards);

@@ -323,8 +323,69 @@ const BURST_COUNT     = 3;  // balas por ráfaga
 const BURST_GAP       = 0.07; // segundos entre balas de la ráfaga
 const SHIP_NOSE       = 21;  // distancia de la nariz al origen de la nave
 
+// Skins de la nave: cada una define su propia forma y paleta
+const SKINS = [
+  {
+    name:  'Clásica',
+    stroke: '#fff',
+    boost:  '#4ff',
+    flame:  'rgba(255, 130, 0, 0.85)',
+    verts: [[20, 0], [-12, -9], [-7, 0], [-12, 9]],
+  },
+  {
+    name:  'Caza',
+    stroke: '#4ff',
+    boost:  '#fff',
+    flame:  'rgba(120, 220, 255, 0.9)',
+    verts: [[22, 0], [6, -7], [-14, -4], [-16, 0], [-14, 4], [6, 7]],
+  },
+  {
+    name:  'Delta',
+    stroke: '#6f6',
+    boost:  '#fff',
+    flame:  'rgba(0, 255, 120, 0.9)',
+    verts: [[20, 0], [16, -11], [-6, -9], [-2, 0], [-6, 9], [16, 11]],
+  },
+  {
+    name:  'Stinger',
+    stroke: '#f4f',
+    boost:  '#fff',
+    flame:  'rgba(255, 80, 220, 0.9)',
+    verts: [[18, 0], [6, -10], [-6, -6], [-14, -10], [-10, -2], [-18, 0], [-10, 2], [-14, 10], [-6, 6], [6, 10]],
+  },
+];
+
+function drawShipPath(skinIndex, scale = 1) {
+  const verts = SKINS[skinIndex].verts;
+  ctx.beginPath();
+  ctx.moveTo(verts[0][0] * scale, verts[0][1] * scale);
+  for (let i = 1; i < verts.length; i++)
+    ctx.lineTo(verts[i][0] * scale, verts[i][1] * scale);
+  ctx.closePath();
+}
+
+function saveSkin(index) {
+  try { localStorage.setItem('asteroids.skin', String(index)); } catch (e) {}
+}
+
+function loadSkinIndex() {
+  try {
+    const saved = Number(localStorage.getItem('asteroids.skin'));
+    if (Number.isInteger(saved) && saved >= 0 && saved < SKINS.length) return saved;
+  } catch (e) {}
+  return 0;
+}
+
 class Ship {
-  constructor() { this.reset(); }
+  constructor() {
+    this.skin = loadSkinIndex();
+    this.reset();
+  }
+
+  cycleSkin() {
+    this.skin = (this.skin + 1) % SKINS.length;
+    saveSkin(this.skin);
+  }
 
   reset() {
     this.x      = W / 2;
@@ -449,28 +510,27 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = this.boostTimer > 0 ? '#4ff'
+    const skin = SKINS[this.skin];
+    ctx.strokeStyle = this.boostTimer > 0 ? skin.boost
                     : this.tripleTimer > 0 ? '#ff4'
-                    : '#fff';
+                    : skin.stroke;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
-    // Silueta clásica: triángulo con muesca trasera
-    ctx.beginPath();
-    ctx.moveTo( 20,  0);   // nariz
-    ctx.lineTo(-12, -9);   // ala izquierda
-    ctx.lineTo( -7,  0);   // muesca trasera
-    ctx.lineTo(-12,  9);   // ala derecha
-    ctx.closePath();
+    // Silueta según la skin activa
+    drawShipPath(this.skin);
     ctx.stroke();
 
-    // Llama del propulsor
+    // Llama del propulsor (anclada al punto trasero de la forma)
     if (this.thrusting && Math.random() > 0.35) {
+      let minX = 0;
+      for (const v of skin.verts) if (v[0] < minX) minX = v[0];
+      const base = minX + 2;
       ctx.beginPath();
-      ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
-      ctx.lineTo(-8,  4);
-      ctx.strokeStyle = 'rgba(255, 130, 0, 0.85)';
+      ctx.moveTo(base, -4);
+      ctx.lineTo(base - 2 - rand(6, 14), 0);
+      ctx.lineTo(base,  4);
+      ctx.strokeStyle = skin.flame;
       ctx.stroke();
     }
 
@@ -588,6 +648,9 @@ function killShip() {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 function update(dt) {
+  // Cambio de skin disponible en cualquier estado (también en GAME OVER)
+  if (pressed('KeyS')) ship.cycleSkin();
+
   if (state === 'gameover') {
     if (pressed('Space')) initGame();
     particles.forEach(p => p.update(dt));
@@ -734,18 +797,23 @@ function update(dt) {
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
 function drawLifeIcon(x, y) {
+  // Escala la forma de la skin actual para que quepa en el icono
+  const skin = SKINS[ship.skin];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [vx, vy] of skin.verts) {
+    if (vx < minX) minX = vx;
+    if (vx > maxX) maxX = vx;
+    if (vy < minY) minY = vy;
+    if (vy > maxY) maxY = vy;
+  }
+  const scale = Math.min(14 / (maxX - minX), 9 / (maxY - minY));
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-Math.PI / 2);
-  ctx.strokeStyle = '#fff';
+  ctx.strokeStyle = skin.stroke;
   ctx.lineWidth   = 1.2;
   ctx.lineJoin    = 'round';
-  ctx.beginPath();
-  ctx.moveTo( 9,  0);
-  ctx.lineTo(-6, -5);
-  ctx.lineTo(-3,  0);
-  ctx.lineTo(-6,  5);
-  ctx.closePath();
+  drawShipPath(ship.skin, scale);
   ctx.stroke();
   ctx.restore();
 }
@@ -807,6 +875,12 @@ function drawHUD() {
     ctx.textAlign = 'center';
     ctx.fillText('TRIPLE', W / 2, y - 6);
   }
+
+  // Skin activa
+  ctx.textAlign = 'left';
+  ctx.font      = '12px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillText(`SKIN: ${SKINS[ship.skin].name}  [S] CAMBIAR`, 14, H - 14);
 }
 
 function drawOverlay(title, sub) {
